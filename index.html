@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Живая очередь - сервис</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f6f7f9;
+      padding: 20px;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    .stat-block {
+      background: #fff;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid #ddd;
+    }
+
+    .stat-block h3 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+    }
+
+    .stat-block ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      font-size: 13px;
+    }
+
+    .stat-block li {
+      margin-bottom: 4px;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      background: #fff;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    th {
+      background: #f0f0f0;
+    }
+
+    select, input {
+      width: 100%;
+      padding: 4px;
+      box-sizing: border-box;
+    }
+
+    button {
+      padding: 6px 12px;
+      cursor: pointer;
+      margin-top: 10px;
+      margin-right: 10px;
+    }
+
+    .delete-btn {
+      background: #ff4d4f;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+    }
+
+    .delete-btn:hover {
+      background: #d9363e;
+    }
+
+    .disabled {
+      background: #f3f3f3;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Живая очередь клиентов</h1>
+
+<div class="stats">
+  <div class="stat-block">
+    <h3>Общая статистика</h3>
+    <ul>
+      <li>Всего клиентов: <strong id="totalCount">0</strong></li>
+      <li>Обслужены: <strong id="servedCount">0</strong></li>
+      <li>Не обслужены: <strong id="notServedCount">0</strong></li>
+    </ul>
+  </div>
+
+  <div class="stat-block">
+    <h3>Цель визита</h3>
+    <ul id="goalStats"></ul>
+  </div>
+
+  <div class="stat-block">
+    <h3>Причины не обслуживания</h3>
+    <ul id="reasonStats"></ul>
+  </div>
+</div>
+
+<table id="queueTable">
+  <thead>
+    <tr>
+      <th>№</th>
+      <th>Дата</th>
+      <th>Клиент</th>
+      <th>Цель визита</th>
+      <th>Статус обслуживания</th>
+      <th>Причина не обслуживания</th>
+      <th>Комментарий</th>
+      <th>Действие</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<button onclick="addRow()">Добавить клиента</button>
+<button onclick="exportToExcel()">Экспорт в Excel</button>
+
+<script>
+  const visitGoals = [
+    "Диагностика",
+    "Ремонт",
+    "ТО",
+    "Консультация",
+    "Гарантийный случай"
+  ];
+
+  const serviceStatus = ["Обслужен", "Не обслужен"];
+
+  const noServiceReasons = [
+    "Нет свободных мастеров",
+    "Клиент отказался",
+    "Нет запчастей",
+    "Не подошло время",
+    "Другое"
+  ];
+
+  const tableBody = document.querySelector("#queueTable tbody");
+
+  function createSelect(options, value = "") {
+    const select = document.createElement("select");
+    select.appendChild(new Option("", ""));
+    options.forEach(opt => select.appendChild(new Option(opt, opt)));
+    select.value = value;
+    return select;
+  }
+
+  function addRow(data = {}) {
+    const row = document.createElement("tr");
+
+    row.innerHTML = `
+      <td></td>
+      <td><input type="date" value="${data.date || ""}"></td>
+      <td><input type="text" value="${data.client || ""}"></td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td><input type="text" value="${data.comment || ""}"></td>
+      <td><button class="delete-btn">Удалить</button></td>
+    `;
+
+    const goalSelect = createSelect(visitGoals, data.goal);
+    const statusSelect = createSelect(serviceStatus, data.status);
+    const reasonSelect = createSelect(noServiceReasons, data.reason);
+    const commentInput = row.cells[6].querySelector("input");
+
+    row.cells[3].appendChild(goalSelect);
+    row.cells[4].appendChild(statusSelect);
+    row.cells[5].appendChild(reasonSelect);
+
+    function syncState() {
+      if (statusSelect.value === "Не обслужен") {
+        reasonSelect.disabled = false;
+        commentInput.disabled = false;
+        commentInput.classList.remove("disabled");
+      } else {
+        reasonSelect.value = "";
+        commentInput.value = "";
+        reasonSelect.disabled = true;
+        commentInput.disabled = true;
+        commentInput.classList.add("disabled");
+      }
+    }
+
+    statusSelect.addEventListener("change", () => {
+      syncState();
+      saveData();
+    });
+
+    syncState();
+
+    row.querySelector(".delete-btn").addEventListener("click", () => {
+      if (confirm("Удалить запись?")) {
+        row.remove();
+        updateNumbers();
+        saveData();
+      }
+    });
+
+    tableBody.appendChild(row);
+    updateNumbers();
+    row.querySelectorAll("input, select").forEach(el => {
+      el.addEventListener("change", saveData);
+      el.addEventListener("keyup", saveData);
+    });
+
+    saveData();
+  }
+
+  function updateNumbers() {
+    [...tableBody.rows].forEach((row, i) => {
+      row.cells[0].textContent = i + 1;
+    });
+    updateStats();
+  }
+
+  function updateStats() {
+    const rows = [...tableBody.rows];
+    document.getElementById("totalCount").textContent = rows.length;
+    document.getElementById("servedCount").textContent =
+      rows.filter(r => r.cells[4].querySelector("select").value === "Обслужен").length;
+    document.getElementById("notServedCount").textContent =
+      rows.filter(r => r.cells[4].querySelector("select").value === "Не обслужен").length;
+
+    renderGroupedStats(rows, 3, "goalStats");
+    renderGroupedStats(
+      rows.filter(r => r.cells[4].querySelector("select").value === "Не обслужен"),
+      5,
+      "reasonStats"
+    );
+  }
+
+  function renderGroupedStats(rows, cellIndex, targetId) {
+    const map = {};
+    rows.forEach(r => {
+      const val = r.cells[cellIndex].querySelector("select")?.value;
+      if (val) map[val] = (map[val] || 0) + 1;
+    });
+
+    const ul = document.getElementById(targetId);
+    ul.innerHTML = "";
+
+    Object.entries(map).forEach(([key, count]) => {
+      const li = document.createElement("li");
+      li.textContent = `${key}: ${count}`;
+      ul.appendChild(li);
+    });
+
+    if (!Object.keys(map).length) {
+      ul.innerHTML = "<li>Нет данных</li>";
+    }
+  }
+
+  function saveData() {
+    const data = [...tableBody.rows].map(row => ({
+      date: row.cells[1].querySelector("input").value,
+      client: row.cells[2].querySelector("input").value,
+      goal: row.cells[3].querySelector("select").value,
+      status: row.cells[4].querySelector("select").value,
+      reason: row.cells[5].querySelector("select").value,
+      comment: row.cells[6].querySelector("input").value
+    }));
+    localStorage.setItem("queueServiceData", JSON.stringify(data));
+    updateStats();
+  }
+
+  function loadData() {
+    const saved = localStorage.getItem("queueServiceData");
+    if (!saved) return;
+    JSON.parse(saved).forEach(row => addRow(row));
+  }
+
+  function exportToExcel() {
+    let csv = "№;Дата;Клиент;Цель;Статус;Причина;Комментарий\n";
+    [...tableBody.rows].forEach((row, i) => {
+      const v = row.querySelectorAll("input, select");
+      csv += `${i + 1};${v[0].value};${v[1].value};${v[2].value};${v[3].value};${v[4].value};${v[5].value}\n`;
+    });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "queue_service.csv";
+    a.click();
+  }
+
+  loadData();
+</script>
+
+</body>
+</html>
